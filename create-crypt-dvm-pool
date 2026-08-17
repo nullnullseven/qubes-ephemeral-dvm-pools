@@ -1,0 +1,149 @@
+#!/bin/bash
+
+sudo tee /etc/systemd/system/ephemeral-pool.service << 'EOF'
+[Unit]
+Description=Fresh ephemeral encrypted LVM pool with DVM auto-clone
+After=local-fs.target qubesd.service
+Requires=qubesd.service
+Before=qubes-vm@sys-net.service qubes-vm@sys-firewall.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=-/usr/local/bin/ephemeral-pool-destroy.sh
+ExecStart=/usr/local/bin/ephemeral-pool-create.sh
+ExecStop=/usr/local/bin/ephemeral-pool-destroy.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo tee /usr/local/bin/ephemeral-pool-create.sh << 'EOF'
+#!/bin/bash
+set -uo pipefail
+
+POOL_NAME="ephemeral_pool"
+MOUNT_BASE="/var/tmp/ephemeral"
+KEY_FILE="/dev/shm/ephemeral.key"
+IMG_FILE="${MOUNT_BASE}/pool.img"
+LUKS_NAME="ephemeral_crypt"
+POOL_SIZE="4G"
+
+ROOT_DEV=$(findmnt -n -o SOURCE / 2>/dev/null || echo "")
+
+if echo "$ROOT_DEV" | grep -qE "(overlay|/dev/zram0)"; then
+    echo "[*] Detected amnesiac mode: $ROOT_DEV"
+    echo "    Destroying old ephemeral VMs and artifacts..."
+
+    for vm in $(qvm-ls --raw-list --running 2>/dev/null); do
+        if qvm-volume list "$vm" 2>/dev/null | grep -q "${POOL_NAME}"; then
+            echo "    -> Stopping: $vm"
+            qvm-shutdown --wait --timeout 10 "$vm" 2>/dev/null || \
+                qvm-kill "$vm" 2>/dev/null || true
+        fi
+    done
+
+    for vm in $(qvm-ls --raw-list 2>/dev/null); do
+        if qvm-volume list "$vm" 2>/dev/null | grep -q "${POOL_NAME}"; then
+            echo "    -> Removing VM: $vm"
+            qvm-remove --force "$vm" 2>/dev/null || true
+        fi
+    done
+
+    qvm-pool remove "${POOL_NAME}" 2>/dev/null || true
+    vgchange -an ephemeral_vg 2>/dev/null || true
+    vgremove -f ephemeral_vg 2>/dev/null || true
+    cryptsetup close "${LUKS_NAME}" 2>/dev/null || true
+    rm -f "${KEY_FILE}" "${IMG_FILE}"
+
+    echo "[+] Cleanup completed. Pool creation skipped in amnesiac mode."
+    exit 0
+fi
+
+for vm in $(qvm-ls --raw-list 2>/dev/null); do
+    if qvm-volume list "$vm" 2>/dev/null | grep -q "${POOL_NAME}"; then
+        echo "    -> Removing VM: $vm"
+        qvm-kill "$vm" 2>/dev/null || true
+        sleep 1
+        qvm-remove --force "$vm" 2>/dev/null || true
+        sleep 1
+    fi
+done
+
+qvm-pool remove "${POOL_NAME}" 2>/dev/null || true
+sleep 1
+vgchange -an ephemeral_vg 2>/dev/null || true
+vgremove -f ephemeral_vg 2>/dev/null || true
+cryptsetup close "${LUKS_NAME}" 2>/dev/null || true
+rm -f "${KEY_FILE}" "${IMG_FILE}"
+
+mkdir -p "${MOUNT_BASE}"
+install -m600 /dev/null "${KEY_FILE}" && dd if=/dev/urandom bs=1 count=4096 of="${KEY_FILE}" iflag=fullblock
+truncate -s "${POOL_SIZE}" "${IMG_FILE}"
+LOOP_DEV=$(losetup -f --show "${IMG_FILE}")
+cryptsetup luksFormat -q --key-file "${KEY_FILE}" "${LOOP_DEV}"
+cryptsetup open --key-file "${KEY_FILE}" "${LOOP_DEV}" "${LUKS_NAME}"
+pvcreate "/dev/mapper/${LUKS_NAME}"
+vgcreate "ephemeral_vg" "/dev/mapper/${LUKS_NAME}"
+lvcreate -T -n "thin_pool" -l +100%FREE "ephemeral_vg"
+losetup -d "${LOOP_DEV}" || true
+
+if qvm-pool list 2>/dev/null | grep -q "^${POOL_NAME}"; then
+    qvm-pool remove "${POOL_NAME}" 2>/dev/null || true
+    sleep 1
+fi
+qvm-pool add "${POOL_NAME}" lvm_thin --option volume_group=ephemeral_vg --option thin_pool=thin_pool 2>/dev/null || \
+qvm-pool add "${POOL_NAME}" lvm_thin -o volume_group=ephemeral_vg,thin_pool=thin_pool
+
+echo "[*] Copying DVM templates..."
+qvm-ls --raw-list 2>/dev/null | grep -i 'dvm' | grep -v '\-ephemeral$' | while read vm; do
+    [ -n "$vm" ] || continue
+    clone_name="${vm}-ephemeral"
+    qvm-check -q "$clone_name" 2>/dev/null && {
+        qvm-kill "$clone_name" 2>/dev/null || true
+        qvm-remove --force "$clone_name" 2>/dev/null || true
+    }
+    echo "    -> $vm -> ${clone_name}"
+    qvm-clone -P "${POOL_NAME}" "$vm" "$clone_name" && {
+        qvm-prefs "$clone_name" template_for_dispvms True 2>/dev/null || true
+        qvm-prefs "$clone_name" autostart False 2>/dev/null || true
+    }
+done
+
+echo "[+] Done!"
+EOF
+
+sudo tee /usr/local/bin/ephemeral-pool-destroy.sh << 'EOF'
+#!/bin/bash
+set -uo pipefail
+
+POOL_NAME="ephemeral_pool"
+LUKS_NAME="ephemeral_crypt"
+KEY_FILE="/dev/shm/ephemeral.key"
+IMG_FILE="/var/tmp/ephemeral/pool.img"
+
+for vm in $(qvm-ls --raw-list 2>/dev/null); do
+    if qvm-volume list "$vm" 2>/dev/null | grep -q "${POOL_NAME}"; then
+        qvm-kill "$vm" 2>/dev/null || true
+        sleep 1
+        qvm-remove --force "$vm" 2>/dev/null || true
+        sleep 1
+    fi
+done
+
+qvm-pool remove "${POOL_NAME}" 2>/dev/null || true
+sleep 1
+qvm-pool remove "${POOL_NAME}" 2>/dev/null || true
+vgchange -an ephemeral_vg 2>/dev/null || true
+vgremove -f ephemeral_vg 2>/dev/null || true
+cryptsetup close "${LUKS_NAME}" 2>/dev/null || true
+for loop in $(losetup -j "${IMG_FILE}" 2>/dev/null | cut -d: -f1 || true); do
+    [ -n "$loop" ] && losetup -d "$loop" 2>/dev/null || true
+done
+rm -f "${KEY_FILE}" "${IMG_FILE}"
+EOF
+
+sudo chmod +x /usr/local/bin/ephemeral-pool-create.sh
+sudo chmod +x /usr/local/bin/ephemeral-pool-destroy.sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now ephemeral-pool.service
