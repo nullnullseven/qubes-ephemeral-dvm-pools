@@ -8,14 +8,14 @@ Before=qubes-vm@sys-net.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/tmpfs-pool-create.sh
+ExecStart=/usr/local/bin/tmpfs-pool-create
 RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-sudo tee /usr/local/bin/tmpfs-pool-create.sh << 'EOF'
+sudo tee /usr/local/bin/tmpfs-pool-create << 'EOF'
 #!/bin/bash
 set -uo pipefail
 
@@ -154,7 +154,7 @@ for vm in $(qvm-ls --raw-list 2>/dev/null); do
 done
 EOF
 
-sudo tee /usr/local/bin/tmpfs-pool-remove.sh << 'EOF'
+sudo tee /usr/local/bin/tmpfs-pool-remove << 'EOF'
 #!/bin/bash
 
 # Step 1: Stop the service (prevents auto-restart on boot)
@@ -189,7 +189,7 @@ rm -rf /dev/shm/ephemeral
 echo "[+] tmpfs pool stopped and cleaned up."
 EOF
 
-sudo chmod +x /usr/local/bin/tmpfs-pool-create.sh
-sudo chmod +x /usr/local/bin/tmpfs-pool-remove.sh
+sudo chmod +x /usr/local/bin/tmpfs-pool-create
+sudo chmod +x /usr/local/bin/tmpfs-pool-remove
 sudo systemctl daemon-reload
 sudo systemctl enable --now tmpfs-pool.service
