@@ -3,16 +3,13 @@
 sudo tee /etc/systemd/system/tmpfs-pool.service << 'EOF'
 [Unit]
 Description=TMPFS Ephemeral Pool
-After=local-fs.target qubesd.service
-Requires=qubesd.service
-Before=qubes-vm@sys-net.service qubes-vm@sys-firewall.service
+After=qubesd.service
+Before=qubes-vm@sys-net.service
 
 [Service]
 Type=oneshot
-RemainAfterExit=yes
-ExecStartPre=-/usr/local/bin/tmpfs-pool-remove.sh
 ExecStart=/usr/local/bin/tmpfs-pool-create.sh
-ExecStop=/usr/local/bin/tmpfs-pool-remove.sh
+RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target
