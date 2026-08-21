@@ -10,15 +10,15 @@ Before=qubes-vm@sys-net.service qubes-vm@sys-firewall.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStartPre=-/usr/local/bin/ephemeral-pool-remove.sh
-ExecStart=/usr/local/bin/ephemeral-pool-create.sh
-ExecStop=/usr/local/bin/ephemeral-pool-remove.sh
+ExecStartPre=-/usr/local/bin/ephemeral-pool-remove
+ExecStart=/usr/local/bin/ephemeral-pool-create
+ExecStop=/usr/local/bin/ephemeral-pool-remove
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-sudo tee /usr/local/bin/ephemeral-pool-create.sh << 'EOF'
+sudo tee /usr/local/bin/ephemeral-pool-create << 'EOF'
 #!/bin/bash
 set -uo pipefail
 
@@ -113,7 +113,7 @@ done
 echo "[+] Done!"
 EOF
 
-sudo tee /usr/local/bin/ephemeral-pool-remove.sh << 'EOF'
+sudo tee /usr/local/bin/ephemeral-pool-remove << 'EOF'
 #!/bin/bash
 set -uo pipefail
 
@@ -143,7 +143,7 @@ done
 rm -f "${KEY_FILE}" "${IMG_FILE}"
 EOF
 
-sudo chmod +x /usr/local/bin/ephemeral-pool-create.sh
-sudo chmod +x /usr/local/bin/ephemeral-pool-remove.sh
+sudo chmod +x /usr/local/bin/ephemeral-pool-create
+sudo chmod +x /usr/local/bin/ephemeral-pool-remove
 sudo systemctl daemon-reload
 sudo systemctl enable --now ephemeral-pool.service
