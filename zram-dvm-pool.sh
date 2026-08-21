@@ -8,14 +8,14 @@ Before=qubes-vm@sys-net.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/zram-pool-create.sh
+ExecStart=/usr/local/bin/zram-pool-create
 RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-sudo tee /usr/local/bin/zram-pool-create.sh << 'EOF'
+sudo tee /usr/local/bin/zram-pool-create << 'EOF'
 #!/bin/bash
 set -euo pipefail
 
@@ -204,7 +204,7 @@ if [ ${#EXTRA_VMS[@]} -gt 0 ]; then
 fi
 EOF
 
-sudo tee /usr/local/bin/zram-pool-remove.sh << 'EOF'
+sudo tee /usr/local/bin/zram-pool-remove << 'EOF'
 #!/bin/bash
 
 # Step 1: Stop and disable the systemd service
@@ -249,7 +249,7 @@ done
 echo "[+] zram pool completely removed. Reboot to clear all traces from memory."
 EOF
 
-sudo chmod +x /usr/local/bin/zram-pool-create.sh
-sudo chmod +x /usr/local/bin/zram-pool-remove.sh
+sudo chmod +x /usr/local/bin/zram-pool-create
+sudo chmod +x /usr/local/bin/zram-pool-remove
 sudo systemctl daemon-reload
 sudo systemctl enable --now zram-pool.service
