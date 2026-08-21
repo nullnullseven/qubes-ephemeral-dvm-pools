@@ -3,13 +3,16 @@
 sudo tee /etc/systemd/system/tmpfs-pool.service << 'EOF'
 [Unit]
 Description=TMPFS Ephemeral Pool
-After=qubesd.service
-Before=qubes-vm@sys-net.service
+After=local-fs.target qubesd.service
+Requires=qubesd.service
+Before=qubes-vm@sys-net.service qubes-vm@sys-firewall.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/tmpfs-pool-create.sh
 RemainAfterExit=yes
+ExecStartPre=-/usr/local/bin/tmpfs-pool-remove.sh
+ExecStart=/usr/local/bin/tmpfs-pool-create.sh
+ExecStop=/usr/local/bin/tmpfs-pool-remove.sh
 
 [Install]
 WantedBy=multi-user.target
@@ -154,6 +157,42 @@ for vm in $(qvm-ls --raw-list 2>/dev/null); do
 done
 EOF
 
+sudo tee /usr/local/bin/tmpfs-pool-remove.sh << 'EOF'
+#!/bin/bash
+
+# Step 1: Stop the service (prevents auto-restart on boot)
+sudo systemctl stop tmpfs-pool.service
+sudo systemctl disable tmpfs-pool.service
+
+# Step 2: Remove all VMs from tmpfs_pool
+echo "[*] Removing VMs from tmpfs_pool..."
+for vm in $(qvm-ls --raw-list 2>/dev/null); do
+    if qvm-volume list "$vm" 2>/dev/null | grep -q "tmpfs_pool"; then
+        echo "    -> Removing: $vm"
+        qvm-kill "$vm" 2>/dev/null || true
+        sleep 1
+        qvm-remove --force "$vm" 2>/dev/null || true
+        sleep 1
+    fi
+done
+
+# Step 3: Remove the Qubes storage pool
+echo "[*] Removing tmpfs_pool..."
+qvm-pool remove tmpfs_pool 2>/dev/null || true
+
+# Step 4: Clean up LVM
+echo "[*] Cleaning up LVM..."
+vgchange -an ephemeral_vg 2>/dev/null || true
+vgremove -f ephemeral_vg 2>/dev/null || true
+
+# Step 5: Free RAM by removing the image
+echo "[*] Freeing RAM..."
+rm -rf /dev/shm/ephemeral
+
+echo "[+] tmpfs pool stopped and cleaned up."
+EOF
+
 sudo chmod +x /usr/local/bin/tmpfs-pool-create.sh
+sudo chmod +x /usr/local/bin/tmpfs-pool-remove.sh
 sudo systemctl daemon-reload
 sudo systemctl enable --now tmpfs-pool.service
