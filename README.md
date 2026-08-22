@@ -9,3 +9,5 @@ Create pools:
 Remove pools:
 
 `sudo <name>-pool-remove`
+
+`autostart-zram-pool` - example script where all dvm or specified dvm are cloned into a new zram-pool, then the original dvm are hidden. the pool is recreated on each Qubes OS boot and removes previously created dvms. systemd is not used
